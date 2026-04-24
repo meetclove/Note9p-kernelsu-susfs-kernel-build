@@ -1,6 +1,5 @@
-
 name: Build Kernel
-run-name: Build Kernel with KernelSU Next susfs
+run-name: Build Kernel with SukiSU-Ultra susfs # 1. 修改了运行名称
 on:
   workflow_dispatch:
     inputs:
@@ -48,12 +47,15 @@ jobs:
           git clone https://github.com/thofd/Note9p-kernelsu-susfs-kernel-build.git src
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 --depth=1 susfs
 
-      - name: 3.添加KernelSU Next
+      - name: 3.添加SukiSU-Ultra # 2. 修改为拉取 SukiSU-Ultra
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # 先移除可能存在的KernelSU目录
+          rm -rf KernelSU
+          # 【注意】请将下面的URL替换为 SukiSU-Ultra 真实的 Github 仓库地址！
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
 
-      - name: 4.修补KernelSU Next
+      - name: 4.修补SU与内核定制补丁
         run: |
           ls
           echo "进入源码目录"
@@ -62,21 +64,33 @@ jobs:
           patch -p1 < new_defconfig.patch
           patch -p1 < non-kprobes.patch
 
-      - name: 5.修补susfs
+      - name: 5.修补susfs (含内核与SU模块) # 3. 完善了SUSFS修补逻辑
         run: |
           if [ ${{ inputs.susfs }} = 'SUSFS' ]; then
             echo "选择susfs修补"
             cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
+            
+            # --- 阶段 A: 修补内核侧 ---
             echo "复制susfs/kernel_patches/fs/"
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/fs/* ./fs/
             echo "复制susfs/kernel_patches/include/linux/"
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/include/linux/* ./include/linux/
             echo "复制susfs内核补丁"
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/50_add_susfs_in_kernel-4.19.patch .
-            echo "执行susfs补丁"
+            echo "执行susfs内核补丁"
             patch -p1 < 50_add_susfs_in_kernel-4.19.patch || true
-            echo "修复susfs补丁"
+            echo "修复susfs内核补丁冲突"
             patch -p1 < after_patch_fix.patch            
+            
+            # --- 阶段 B: 修补SU侧 (新增逻辑) ---
+            echo "修补 SukiSU-Ultra 目录支持 SUSFS"
+            cd KernelSU
+            # 拷贝针对KSU/SukiSU的SUSFS补丁
+            cp $GITHUB_WORKSPACE/kernel_workspace/susfs/ksu_patches/50_add_susfs_in_ksu-*.patch . || true
+            # 执行SU侧修补
+            patch -p1 < 50_add_susfs_in_ksu-*.patch || true
+            cd ..
+            
           else
             echo "跳过susfs修补"
           fi
@@ -116,13 +130,13 @@ jobs:
             cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel/out/arch/arm64/boot
             ls
             strings Image | grep "Linux version"
-            mkdir $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/kernels/
-            mkdir $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/kernels/miui/
+            mkdir -p $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/kernels/miui/
             cp Image $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/kernels/miui/
 
       - name: 8.上传刷机包
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.phone }}-KernelSU-Next-${{ inputs.susfs }}-AnyKernel3
+          # 4. 修改产物名称，体现出 SukiSU-Ultra
+          name: ${{ inputs.phone }}-SukiSU-Ultra-${{ inputs.susfs }}-AnyKernel3
           path: kernel_workspace/src/Anykernel/*
           retention-days: 3
